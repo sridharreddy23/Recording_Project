@@ -38,7 +38,7 @@ def format_datetime(utc_timestamp: int) -> str:
     """
     try:
         return dt.datetime.fromtimestamp(utc_timestamp, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    except (ValueError, OSError) as e:
+    except (ValueError, OSError, OverflowError) as e:
         log.warning(f"Invalid timestamp {utc_timestamp}: {e}")
         return f"Invalid Timestamp ({utc_timestamp})"
 
@@ -136,7 +136,7 @@ def get_file_path_to_read(base_utc: int) -> str:
     file_path = f"{date_str}/{hour_str}/{start_epoch}-{end_epoch}.es"
     return file_path
 
-def get_start_utc_from_filename(filename: str) -> Optional[int]:
+def get_start_utc_from_filename(filename: str) -> int:
     """
     Extracts the start UTC epoch second from a filename like '.../12345-67890.es'.
     
@@ -144,7 +144,7 @@ def get_start_utc_from_filename(filename: str) -> Optional[int]:
         filename: Path or filename to parse
         
     Returns:
-        Start UTC timestamp in seconds, or None if parsing fails
+        Start UTC timestamp in seconds, or 0 if parsing fails
     """
     basename = os.path.basename(filename)
     match = re.match(r'(\d+)-(\d+)\.es$', basename)
@@ -153,13 +153,13 @@ def get_start_utc_from_filename(filename: str) -> Optional[int]:
             timestamp = int(match.group(1))
             if timestamp <= 0:
                 log.warning(f"Invalid timestamp ({timestamp}) from filename: {basename}")
-                return None
+                return 0
             return timestamp
         except (ValueError, OverflowError) as e:
             log.error(f"Could not parse start epoch from filename {basename}: {e}")
-            return None
+            return 0
     log.debug(f"Filename pattern not matched for start epoch extraction: {basename}")
-    return None
+    return 0
 
 def convert_pcr_27mhz_to_pcr_ns(pcr_27mhz: int) -> int:
     """
@@ -241,13 +241,16 @@ def print_progress(current: int, total: int, prefix: str = "", suffix: str = "",
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-def validate_config(config: Dict[str, Any]) -> None:
+def validate_config(config: Dict[str, Any]) -> bool:
     """
     Validates the configuration dictionary.
-    
+
     Args:
         config: Configuration dictionary
-        
+
+    Returns:
+        True if configuration is valid
+
     Raises:
         ValueError: If configuration is invalid
         TypeError: If configuration has wrong types
@@ -294,6 +297,8 @@ def validate_config(config: Dict[str, Any]) -> None:
     if aws_conf.get("access_key") or aws_conf.get("secret_key"):
         log.warning("AWS credentials found in config file. Consider using environment variables, "
                    "~/.aws/credentials, or IAM roles instead for better security.")
+
+    return True
 
 def save_progress_state(state_file: str, progress_data: Dict[str, Any]) -> bool:
     """
@@ -349,4 +354,3 @@ def load_progress_state(state_file: str) -> Dict[str, Any]:
     except Exception as e:
         log.error(f"Unexpected error loading progress state: {e}")
         return {}
-
