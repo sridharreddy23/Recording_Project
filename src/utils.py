@@ -8,19 +8,46 @@ import datetime as dt
 import logging
 import sys
 import json
+import shutil
 from typing import Tuple, Dict, Any, List
 from colorama import Fore, Style, init
 
 # Initialize colorama
 init(autoreset=True)
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-log = logging.getLogger(__name__)
+class ModernLogFormatter(logging.Formatter):
+    """Compact and readable log formatter for terminal-first workflows."""
+
+    LEVEL_STYLES = {
+        logging.DEBUG: ("🔎", Fore.BLUE),
+        logging.INFO: ("ℹ", Fore.CYAN),
+        logging.WARNING: ("⚠", Fore.YELLOW),
+        logging.ERROR: ("✖", Fore.RED),
+        logging.CRITICAL: ("⛔", Fore.MAGENTA),
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        icon, color = self.LEVEL_STYLES.get(record.levelno, ("•", Fore.WHITE))
+        ts = dt.datetime.fromtimestamp(record.created, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        level = f"{record.levelname:<8}"
+        return f"{Style.DIM}{Fore.WHITE}{ts}{Style.RESET_ALL} {color}{icon} {level}{Style.RESET_ALL} {record.getMessage()}"
+
+
+def configure_logging() -> logging.Logger:
+    """Configure a modern single-line logging format for this app."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+
+    for handler in root.handlers:
+        handler.setFormatter(ModernLogFormatter())
+
+    return logging.getLogger(__name__)
+
+
+log = configure_logging()
 
 def format_datetime(utc_timestamp: int) -> str:
     """
@@ -175,41 +202,33 @@ def convert_pcr_27mhz_to_pcr_ns(pcr_27mhz: int) -> int:
         return 0  # Handle potential weird values
     return (int(pcr_27mhz) * 1000) // 27  # Integer division for nanoseconds
 
+def _rule(char: str = "─") -> str:
+    """Build a responsive separator line based on terminal width."""
+    width = shutil.get_terminal_size(fallback=(100, 20)).columns
+    return char * max(40, min(width - 2, 100))
+
+
 def print_banner():
-    """Prints a formatted application banner."""
-    banner = f"""
-{Fore.CYAN}╔═══════════════════════════════════════════════════╗
-{Fore.CYAN}║ {Fore.YELLOW}    _      _                                   {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}   | |    (_)                                  {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}   | |     _ _   _____  ___                    {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}   | |    | | | / / _ \\/ _ \\                   {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}   | |____| | |/ /  __/  __/                   {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}   |______|_|___/ \\___|\\___/                   {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.YELLOW}      S3 ES Downloader & Parser                {Fore.CYAN} ║
-{Fore.CYAN}║ {Fore.GREEN}             Enhanced Version v3.0              {Fore.CYAN} ║
-{Fore.CYAN}╚═══════════════════════════════════════════════════╝
-{Fore.YELLOW}[Press Ctrl+C at any time to exit the program]
-"""
-    print(banner)
+    """Print a modern, concise startup banner."""
+    print()
+    print(f"{Fore.CYAN}{Style.BRIGHT}▶ ES Downloader & Parser{Style.RESET_ALL} {Fore.WHITE}v2026.2")
+    print(f"{Fore.BLUE}{_rule()}")
+    print(f"{Fore.WHITE}Fast preflight checks • resilient download/parse • optional cloud upload")
+    print(f"{Fore.YELLOW}Tip: Press Ctrl+C to cancel safely.{Style.RESET_ALL}")
+
 
 def print_section_header(title: str):
-    """
-    Prints a formatted section header.
-    
-    Args:
-        title: Header title text
-    """
-    print(f"\n{Fore.CYAN}╔{'═' * (len(title) + 8)}╗")
-    print(f"{Fore.CYAN}║    {Fore.YELLOW}{title}{Fore.CYAN}    ║")
-    print(f"{Fore.CYAN}╚{'═' * (len(title) + 8)}╝{Style.RESET_ALL}")
+    """Print a clean section header for terminal readability."""
+    print(f"\n{Fore.BLUE}{_rule()}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}▸ {title}{Style.RESET_ALL} {Fore.WHITE}{Style.DIM}• stage{Style.RESET_ALL}")
+
 
 def print_final_success():
-    """Prints a final success message box."""
-    print(f"\n{Fore.GREEN}╔{'═' * 45}╗")
-    print(f"{Fore.GREEN}║{' ' * 45}║")
-    print(f"{Fore.GREEN}║   {Fore.YELLOW}Process completed successfully!{' ' * 10}{Fore.GREEN}║")
-    print(f"{Fore.GREEN}║{' ' * 45}║")
-    print(f"{Fore.GREEN}╚{'═' * 45}╝{Style.RESET_ALL}")
+    """Print a clean completion card."""
+    print(f"\n{Fore.GREEN}{_rule('═')}")
+    print(f"{Fore.GREEN}{Style.BRIGHT}✅ Pipeline completed successfully{Style.RESET_ALL}")
+    print(f"{Fore.GREEN}{_rule('═')}{Style.RESET_ALL}")
+
 
 def print_progress(current: int, total: int, prefix: str = "", suffix: str = "", length: int = 50) -> None:
     """
