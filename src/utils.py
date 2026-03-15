@@ -14,12 +14,50 @@ from colorama import Fore, Style, init
 # Initialize colorama
 init(autoreset=True)
 
+class TastyConsoleFormatter(logging.Formatter):
+    """A colorful and expressive console formatter for CLI logs."""
+
+    LEVEL_THEME = {
+        logging.DEBUG: ("🫐", Fore.BLUE),
+        logging.INFO: ("🍋", Fore.CYAN),
+        logging.WARNING: ("🌶️", Fore.YELLOW),
+        logging.ERROR: ("🍅", Fore.RED),
+        logging.CRITICAL: ("🔥", Fore.MAGENTA),
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        emoji, color = self.LEVEL_THEME.get(record.levelno, ("🍽️", Fore.WHITE))
+        level_name = record.levelname.ljust(8)
+        timestamp = self.formatTime(record, self.datefmt)
+        message = record.getMessage()
+        return (
+            f"{Fore.LIGHTBLACK_EX}{timestamp}{Style.RESET_ALL} "
+            f"{emoji} {color}{level_name}{Style.RESET_ALL} "
+            f"{Fore.WHITE}{message}{Style.RESET_ALL}"
+        )
+
+
+def configure_cli_logging(level: int = logging.INFO) -> logging.Logger:
+    """Configure root logger with colorful formatter for CLI readability."""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Avoid stacking duplicate handlers on repeated imports/tests.
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            handler.setFormatter(TastyConsoleFormatter(datefmt="%Y-%m-%d %H:%M:%S"))
+            handler.setLevel(level)
+        return root_logger
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(level)
+    stream_handler.setFormatter(TastyConsoleFormatter(datefmt="%Y-%m-%d %H:%M:%S"))
+    root_logger.addHandler(stream_handler)
+    return root_logger
+
+
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+configure_cli_logging()
 log = logging.getLogger(__name__)
 
 def format_datetime(utc_timestamp: int) -> str:

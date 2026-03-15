@@ -6,13 +6,14 @@ import unittest
 import os
 import tempfile
 import json
+import logging
 from datetime import datetime, timezone
 
 from src.utils import (
     format_datetime, get_bucket_name_path_from_url, get_s3_path,
     get_file_duration, get_file_path_to_read, get_start_utc_from_filename,
     convert_pcr_27mhz_to_pcr_ns, validate_config, save_progress_state,
-    load_progress_state
+    load_progress_state, TastyConsoleFormatter
 )
 
 class TestUtils(unittest.TestCase):
@@ -220,6 +221,24 @@ class TestUtils(unittest.TestCase):
             # Clean up
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+    def test_tasty_console_formatter_adds_emoji_and_level(self):
+        """Formatter should emit colorful level prefix and original message."""
+        formatter = TastyConsoleFormatter(datefmt="%Y-%m-%d %H:%M:%S")
+        record = formatter.format(
+            logging.LogRecord(
+                name="test.logger",
+                level=logging.INFO,
+                pathname=__file__,
+                lineno=1,
+                msg="Delicious status update",
+                args=(),
+                exc_info=None,
+            )
+        )
+        self.assertIn("🍋", record)
+        self.assertIn("INFO", record)
+        self.assertIn("Delicious status update", record)
 
 if __name__ == "__main__":
     unittest.main()
