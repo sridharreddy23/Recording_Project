@@ -8,7 +8,7 @@ import datetime as dt
 import logging
 import sys
 import json
-from typing import Tuple, Dict, Any, Optional, List
+from typing import Tuple, Dict, Any, List
 from colorama import Fore, Style, init
 
 # Initialize colorama
@@ -292,6 +292,13 @@ def validate_config(config: Dict[str, Any]) -> bool:
     s3_prefix = config["s3_prefix"]
     if not isinstance(s3_prefix, str):
         raise TypeError(f"S3 prefix must be a string, got {type(s3_prefix)}")
+
+    normalized_prefix = s3_prefix.strip()
+    if not normalized_prefix:
+        raise ValueError("S3 prefix must be a non-empty string")
+
+    if normalized_prefix.startswith("s3://"):
+        raise ValueError("S3 prefix should be a key prefix only (without s3://bucket)")
     
     # Check for credentials in config (warning only)
     if aws_conf.get("access_key") or aws_conf.get("secret_key"):

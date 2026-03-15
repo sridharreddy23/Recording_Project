@@ -83,6 +83,14 @@ class TestConfigManager(unittest.TestCase):
         self.assertEqual(config_manager.get_nested_value(["aws_conf", "non_existent"], "default"), "default")
         self.assertEqual(config_manager.get_nested_value(["non_existent", "key"], "default"), "default")
     
+    def test_get_nested_value_with_non_dict_intermediate(self):
+        """Test nested lookup gracefully handles non-dict intermediate values."""
+        config_manager = ConfigManager(self.config_path)
+        self.assertEqual(
+            config_manager.get_nested_value(["extra_param", "missing"], "default"),
+            "default"
+        )
+
     def test_invalid_config_file(self):
         """Test handling invalid config file."""
         # Create an invalid JSON file
