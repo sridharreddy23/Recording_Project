@@ -31,6 +31,9 @@ class ModernLogFormatter(logging.Formatter):
         ts = dt.datetime.fromtimestamp(record.created, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
         level = f"{record.levelname:<8}"
         return f"{Style.DIM}{Fore.WHITE}{ts}{Style.RESET_ALL} {color}{icon} {level}{Style.RESET_ALL} {record.getMessage()}"
+        ts = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        level = f"{record.levelname:<8}"
+        return f"{Fore.BLACK}{ts} {color}{icon} {level}{Style.RESET_ALL} {record.getMessage()}"
 
 
 def configure_logging() -> logging.Logger:
@@ -44,6 +47,9 @@ def configure_logging() -> logging.Logger:
     for handler in root.handlers:
         handler.setFormatter(ModernLogFormatter())
 
+    handler = logging.StreamHandler()
+    handler.setFormatter(ModernLogFormatter())
+    root.handlers = [handler]
     return logging.getLogger(__name__)
 
 
@@ -212,6 +218,7 @@ def print_banner():
     """Print a modern, concise startup banner."""
     print()
     print(f"{Fore.CYAN}{Style.BRIGHT}▶ ES Downloader & Parser{Style.RESET_ALL} {Fore.WHITE}v2026.2")
+    print(f"{Fore.CYAN}{Style.BRIGHT}▶ ES Downloader & Parser{Style.RESET_ALL} {Fore.WHITE}v2026.1")
     print(f"{Fore.BLUE}{_rule()}")
     print(f"{Fore.WHITE}Fast preflight checks • resilient download/parse • optional cloud upload")
     print(f"{Fore.YELLOW}Tip: Press Ctrl+C to cancel safely.{Style.RESET_ALL}")
@@ -221,6 +228,7 @@ def print_section_header(title: str):
     """Print a clean section header for terminal readability."""
     print(f"\n{Fore.BLUE}{_rule()}")
     print(f"{Fore.CYAN}{Style.BRIGHT}▸ {title}{Style.RESET_ALL} {Fore.WHITE}{Style.DIM}• stage{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}▸ {title}{Style.RESET_ALL}")
 
 
 def print_final_success():
