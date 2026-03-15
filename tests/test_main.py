@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Unit tests for main module helpers."""
 import os
+import json
 import tempfile
 import unittest
 from argparse import Namespace
 
-from src.main import load_environment_from_dotenv, print_runtime_summary
+from src.main import (
+    calculate_expected_segments,
+    calculate_recommended_space_bytes,
+    load_environment_from_dotenv,
+    print_runtime_summary,
+    run_preflight_checks,
+    write_run_report,
+)
 
 
 class TestMainHelpers(unittest.TestCase):
@@ -63,6 +71,40 @@ class TestMainHelpers(unittest.TestCase):
         """Runtime summary helper should run without errors."""
         args = Namespace(config="config.json", output="output.ts", gofile=False, sendgb=False)
         print_runtime_summary(args, 1609459200, 1609459300, "s3://bucket/path")
+
+    def test_calculate_expected_segments(self):
+        """Segment estimate should use 4-second chunk math."""
+        self.assertEqual(calculate_expected_segments(0, 0), 0)
+        self.assertEqual(calculate_expected_segments(100, 101), 1)
+        self.assertEqual(calculate_expected_segments(100, 108), 2)
+        self.assertEqual(calculate_expected_segments(100, 109), 3)
+
+    def test_calculate_recommended_space_bytes(self):
+        """Space estimate should include processing safety multiplier."""
+        self.assertEqual(calculate_recommended_space_bytes(0), 0)
+        expected = int(3 * (2 * 1024 * 1024) * 2.2)
+        self.assertEqual(calculate_recommended_space_bytes(3), expected)
+
+    def test_run_preflight_checks(self):
+        """Preflight should return expected structure and valid disk check."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = os.path.join(tmp_dir, "out.ts")
+            result = run_preflight_checks(100, 116, output_path)
+            self.assertEqual(result["expected_segments"], 4)
+            self.assertIn("free_space_bytes", result)
+            self.assertIn("recommended_space_bytes", result)
+            self.assertIn("disk_ok", result)
+            self.assertTrue(result["disk_ok"])
+
+    def test_write_run_report(self):
+        """Report writer should persist valid JSON to disk."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report_path = os.path.join(tmp_dir, "report.json")
+            payload = {"status": "success", "downloaded_files": 5}
+            write_run_report(report_path, payload)
+            with open(report_path, "r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            self.assertEqual(loaded, payload)
 
 
 if __name__ == "__main__":
