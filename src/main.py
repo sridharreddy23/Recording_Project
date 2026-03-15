@@ -159,16 +159,31 @@ def calculate_recommended_space_bytes(expected_segments: int, avg_segment_size_b
 def run_preflight_checks(start_utc: int, end_utc: int, output_path: str) -> dict:
     """Run quick reliability-oriented checks before expensive operations begin."""
     expected_segments = calculate_expected_segments(start_utc, end_utc)
-    required_space = calculate_recommended_space_bytes(expected_segments)
+    estimated_data_bytes = expected_segments * (2 * 1024 * 1024)
+    required_temp_space = calculate_recommended_space_bytes(expected_segments)
+    required_output_space = estimated_data_bytes
+
     output_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
-    free_space = shutil.disk_usage(output_dir).free
-    disk_ok = free_space >= required_space if required_space else True
+    temp_dir = tempfile.gettempdir()
+
+    output_free_space = shutil.disk_usage(output_dir).free
+    temp_free_space = shutil.disk_usage(temp_dir).free
+
+    temp_disk_ok = temp_free_space >= required_temp_space if required_temp_space else True
+    output_disk_ok = output_free_space >= required_output_space if required_output_space else True
 
     return {
         "expected_segments": expected_segments,
-        "recommended_space_bytes": required_space,
-        "free_space_bytes": free_space,
-        "disk_ok": disk_ok,
+        "estimated_data_bytes": estimated_data_bytes,
+        "recommended_space_bytes": required_temp_space,
+        "required_output_space_bytes": required_output_space,
+        "temp_free_space_bytes": temp_free_space,
+        "free_space_bytes": temp_free_space,
+        "output_free_space_bytes": output_free_space,
+        "disk_ok": temp_disk_ok and output_disk_ok,
+        "temp_disk_ok": temp_disk_ok,
+        "output_disk_ok": output_disk_ok,
+        "temp_dir": temp_dir,
         "output_dir": output_dir,
     }
 
@@ -450,14 +465,20 @@ Tip:
         preflight = run_preflight_checks(start_utc, end_utc, output_path)
         report_payload["preflight"] = preflight
         log.info("🧠 Preflight: estimated %s segments for selected range", preflight["expected_segments"])
-        log.info("💽 Preflight: free disk %.2f GiB (recommended %.2f GiB)",
-                 preflight["free_space_bytes"] / (1024 ** 3),
-                 preflight["recommended_space_bytes"] / (1024 ** 3))
+        log.info("💽 Preflight temp disk: free %.2f GiB (recommended %.2f GiB) at %s",
+                 preflight["temp_free_space_bytes"] / (1024 ** 3),
+                 preflight["recommended_space_bytes"] / (1024 ** 3),
+                 preflight["temp_dir"])
+        log.info("💽 Preflight output disk: free %.2f GiB (required %.2f GiB) at %s",
+                 preflight["output_free_space_bytes"] / (1024 ** 3),
+                 preflight["required_output_space_bytes"] / (1024 ** 3),
+                 preflight["output_dir"])
 
         if not preflight["disk_ok"]:
             raise RuntimeError(
                 "Preflight failed: not enough free disk space for reliable processing "
-                f"(need ~{preflight['recommended_space_bytes']} bytes)."
+                f"(temp needs ~{preflight['recommended_space_bytes']} bytes at {preflight['temp_dir']}, "
+                f"output needs ~{preflight['required_output_space_bytes']} bytes at {preflight['output_dir']})."
             )
 
         if args.preflight_only:

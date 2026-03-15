@@ -4,6 +4,8 @@ import os
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from argparse import Namespace
 
 from src.main import (
@@ -86,15 +88,43 @@ class TestMainHelpers(unittest.TestCase):
         self.assertEqual(calculate_recommended_space_bytes(3), expected)
 
     def test_run_preflight_checks(self):
-        """Preflight should return expected structure and valid disk check."""
+        """Preflight should return expected structure and validate temp + output disks."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = os.path.join(tmp_dir, "out.ts")
             result = run_preflight_checks(100, 116, output_path)
             self.assertEqual(result["expected_segments"], 4)
-            self.assertIn("free_space_bytes", result)
+            self.assertIn("temp_free_space_bytes", result)
+            self.assertIn("output_free_space_bytes", result)
             self.assertIn("recommended_space_bytes", result)
+            self.assertIn("required_output_space_bytes", result)
             self.assertIn("disk_ok", result)
+            self.assertIn("temp_disk_ok", result)
+            self.assertIn("output_disk_ok", result)
             self.assertTrue(result["disk_ok"])
+
+    def test_run_preflight_checks_uses_temp_filesystem_for_download_space(self):
+        """Temp and output free-space checks should be evaluated independently."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = os.path.join(tmp_dir, "out.ts")
+            output_dir = os.path.dirname(os.path.abspath(output_path))
+            temp_dir = "/mock-temp"
+
+            def fake_disk_usage(path):
+                if path == temp_dir:
+                    return SimpleNamespace(total=0, used=0, free=1)
+                if path == output_dir:
+                    return SimpleNamespace(total=0, used=0, free=10 * 1024 * 1024 * 1024)
+                raise AssertionError(f"Unexpected disk_usage path: {path}")
+
+            with patch("src.main.tempfile.gettempdir", return_value=temp_dir),                  patch("src.main.shutil.disk_usage", side_effect=fake_disk_usage):
+                result = run_preflight_checks(100, 116, output_path)
+
+            self.assertFalse(result["temp_disk_ok"])
+            self.assertTrue(result["output_disk_ok"])
+            self.assertFalse(result["disk_ok"])
+            self.assertEqual(result["temp_free_space_bytes"], 1)
+            self.assertEqual(result["output_dir"], output_dir)
+            self.assertEqual(result["temp_dir"], temp_dir)
 
     def test_write_run_report(self):
         """Report writer should persist valid JSON to disk."""
