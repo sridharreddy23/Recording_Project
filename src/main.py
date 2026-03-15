@@ -8,9 +8,15 @@ import argparse
 import logging
 import tempfile
 import signal
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from botocore.exceptions import ClientError
 import boto3
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
 
 # --- Import project modules ---
 try:
@@ -76,6 +82,60 @@ def signal_handler(sig, frame):
     import time
     time.sleep(1)
     sys.exit(130 if sig == signal.SIGINT else 128 + sig)
+
+
+# --- Environment setup ---
+def load_environment_from_dotenv(config_path: str) -> List[str]:
+    """
+    Load environment variables from .env files without overriding existing env vars.
+
+    Lookup order:
+      1) Project root/current working directory `.env`
+      2) Directory containing the provided config file `.env`
+
+    Args:
+        config_path: Path to configuration JSON file
+
+    Returns:
+        List of `.env` file paths that were loaded
+    """
+    if load_dotenv is None:
+        log.debug("python-dotenv is not available; skipping .env loading")
+        return []
+
+    loaded_files: List[str] = []
+    candidate_paths: List[str] = []
+
+    cwd_env = os.path.join(os.getcwd(), ".env")
+    candidate_paths.append(cwd_env)
+
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    config_env = os.path.join(config_dir, ".env")
+    if config_env not in candidate_paths:
+        candidate_paths.append(config_env)
+
+    for env_path in candidate_paths:
+        if os.path.isfile(env_path) and load_dotenv(env_path, override=False):
+            loaded_files.append(env_path)
+            log.info("Loaded environment variables from %s", env_path)
+
+    return loaded_files
+
+
+def print_runtime_summary(args: argparse.Namespace, start_utc: int, end_utc: int, s3_prefix: str) -> None:
+    """Print a concise, human-friendly run summary."""
+    upload_mode = "none"
+    if args.gofile:
+        upload_mode = "gofile"
+    elif args.sendgb:
+        upload_mode = "sendgb-with-fallback"
+
+    log.info("🚀 Starting processing pipeline")
+    log.info("📄 Config file: %s", args.config)
+    log.info("🎯 Output file: %s", args.output)
+    log.info("🕒 Range: %s -> %s", format_datetime(start_utc), format_datetime(end_utc))
+    log.info("🗂️ S3 prefix: %s", s3_prefix)
+    log.info("☁️ Upload mode: %s", upload_mode)
 
 
 # --- AWS setup ---
@@ -286,14 +346,19 @@ def main() -> int:
 Examples:
   %(prog)s config.json output.ts --gofile
   %(prog)s config.json output.ts --sendgb --sendgb-wait 300
+
+Tip:
+  Put AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION, and GOFILE_TOKEN
+  in a .env file to avoid re-exporting them every terminal session.
         """
     )
     parser.add_argument("config", help="Path to configuration JSON file")
     parser.add_argument("output", help="Final TS output file path")
-    parser.add_argument("--sendgb", action="store_true", 
-                       help="Try SendGB upload (fallback to GoFile on fail)")
-    parser.add_argument("--gofile", action="store_true", 
-                       help="Upload final TS directly to GoFile")
+    upload_group = parser.add_mutually_exclusive_group()
+    upload_group.add_argument("--sendgb", action="store_true", 
+                             help="Try SendGB upload (fallback to GoFile on fail)")
+    upload_group.add_argument("--gofile", action="store_true", 
+                             help="Upload final TS directly to GoFile")
     parser.add_argument("--sendgb-wait", type=int, default=600, 
                        help="Seconds to wait for SendGB upload (default: 600)")
     parser.add_argument("--debug", "-d", action="store_true", 
@@ -306,6 +371,10 @@ Examples:
         logging.getLogger("boto3").setLevel(logging.DEBUG)
         logging.getLogger("botocore").setLevel(logging.DEBUG)
         log.info("Debug logging enabled")
+
+    loaded_env_files = load_environment_from_dotenv(args.config)
+    if not loaded_env_files:
+        log.info("No .env file found (or no new values loaded); using existing environment/config values")
 
     print_banner()
 
@@ -322,10 +391,7 @@ Examples:
         output_path = args.output
 
         print_section_header("Setup")
-        log.info(f"Config: {args.config}")
-        log.info(f"Output: {output_path}")
-        log.info(f"Range: {format_datetime(start_utc)} -> {format_datetime(end_utc)}")
-        log.info(f"S3 prefix: {s3_prefix}")
+        print_runtime_summary(args, start_utc, end_utc, s3_prefix)
 
         # Check for shutdown request
         if _shutdown_requested:

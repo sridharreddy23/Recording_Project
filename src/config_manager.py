@@ -156,7 +156,7 @@ class ConfigManager:
         """
         current = self.config
         for key in keys:
-            if key in current:
+            if isinstance(current, dict) and key in current:
                 current = current[key]
             else:
                 return default
