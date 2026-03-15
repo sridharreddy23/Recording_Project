@@ -165,6 +165,30 @@ class TestUtils(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             validate_config(config)
+
+        # Test empty prefix
+        config = {
+            "start_utc": 1609459200,
+            "end_utc": 1609459300,
+            "s3_prefix": "   ",
+            "aws_conf": {
+                "s3_bucket": "my-bucket"
+            }
+        }
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+        # Test full S3 URL in prefix (should not include bucket)
+        config = {
+            "start_utc": 1609459200,
+            "end_utc": 1609459300,
+            "s3_prefix": "s3://my-bucket/path/to/prefix",
+            "aws_conf": {
+                "s3_bucket": "my-bucket"
+            }
+        }
+        with self.assertRaises(ValueError):
+            validate_config(config)
     
     def test_save_load_progress_state(self):
         """Test saving and loading progress state."""
