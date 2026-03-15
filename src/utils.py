@@ -28,6 +28,9 @@ class ModernLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         icon, color = self.LEVEL_STYLES.get(record.levelno, ("•", Fore.WHITE))
+        ts = dt.datetime.fromtimestamp(record.created, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        level = f"{record.levelname:<8}"
+        return f"{Style.DIM}{Fore.WHITE}{ts}{Style.RESET_ALL} {color}{icon} {level}{Style.RESET_ALL} {record.getMessage()}"
         ts = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
         level = f"{record.levelname:<8}"
         return f"{Fore.BLACK}{ts} {color}{icon} {level}{Style.RESET_ALL} {record.getMessage()}"
@@ -37,6 +40,13 @@ def configure_logging() -> logging.Logger:
     """Configure a modern single-line logging format for this app."""
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+
+    for handler in root.handlers:
+        handler.setFormatter(ModernLogFormatter())
+
     handler = logging.StreamHandler()
     handler.setFormatter(ModernLogFormatter())
     root.handlers = [handler]
@@ -207,6 +217,7 @@ def _rule(char: str = "─") -> str:
 def print_banner():
     """Print a modern, concise startup banner."""
     print()
+    print(f"{Fore.CYAN}{Style.BRIGHT}▶ ES Downloader & Parser{Style.RESET_ALL} {Fore.WHITE}v2026.2")
     print(f"{Fore.CYAN}{Style.BRIGHT}▶ ES Downloader & Parser{Style.RESET_ALL} {Fore.WHITE}v2026.1")
     print(f"{Fore.BLUE}{_rule()}")
     print(f"{Fore.WHITE}Fast preflight checks • resilient download/parse • optional cloud upload")
@@ -216,6 +227,7 @@ def print_banner():
 def print_section_header(title: str):
     """Print a clean section header for terminal readability."""
     print(f"\n{Fore.BLUE}{_rule()}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}▸ {title}{Style.RESET_ALL} {Fore.WHITE}{Style.DIM}• stage{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{Style.BRIGHT}▸ {title}{Style.RESET_ALL}")
 
 
