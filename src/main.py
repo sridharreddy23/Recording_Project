@@ -8,6 +8,9 @@ import argparse
 import logging
 import tempfile
 import signal
+import json
+import shutil
+import time
 from typing import Tuple, Optional, List
 from botocore.exceptions import ClientError
 import boto3
@@ -136,6 +139,45 @@ def print_runtime_summary(args: argparse.Namespace, start_utc: int, end_utc: int
     log.info("🕒 Range: %s -> %s", format_datetime(start_utc), format_datetime(end_utc))
     log.info("🗂️ S3 prefix: %s", s3_prefix)
     log.info("☁️ Upload mode: %s", upload_mode)
+
+
+def calculate_expected_segments(start_utc: int, end_utc: int, segment_seconds: int = 4) -> int:
+    """Estimate number of expected ES segments for the configured time window."""
+    if end_utc <= start_utc:
+        return 0
+    return (max(0, end_utc - start_utc) + segment_seconds - 1) // segment_seconds
+
+
+def calculate_recommended_space_bytes(expected_segments: int, avg_segment_size_bytes: int = 2 * 1024 * 1024) -> int:
+    """Estimate required temp disk footprint (download + final TS + safety margin)."""
+    if expected_segments <= 0:
+        return 0
+    estimated_data = expected_segments * avg_segment_size_bytes
+    return int(estimated_data * 2.2)
+
+
+def run_preflight_checks(start_utc: int, end_utc: int, output_path: str) -> dict:
+    """Run quick reliability-oriented checks before expensive operations begin."""
+    expected_segments = calculate_expected_segments(start_utc, end_utc)
+    required_space = calculate_recommended_space_bytes(expected_segments)
+    output_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
+    free_space = shutil.disk_usage(output_dir).free
+    disk_ok = free_space >= required_space if required_space else True
+
+    return {
+        "expected_segments": expected_segments,
+        "recommended_space_bytes": required_space,
+        "free_space_bytes": free_space,
+        "disk_ok": disk_ok,
+        "output_dir": output_dir,
+    }
+
+
+def write_run_report(report_path: str, report_payload: dict) -> None:
+    """Write a structured run report for auditability and appraisal evidence."""
+    with open(report_path, "w", encoding="utf-8") as fh:
+        json.dump(report_payload, fh, indent=2)
+        fh.write("\n")
 
 
 # --- AWS setup ---
@@ -363,6 +405,10 @@ Tip:
                        help="Seconds to wait for SendGB upload (default: 600)")
     parser.add_argument("--debug", "-d", action="store_true", 
                        help="Enable debug logs")
+    parser.add_argument("--preflight-only", action="store_true",
+                       help="Run smart preflight checks and exit without downloading")
+    parser.add_argument("--report-file", default=None,
+                       help="Optional JSON report path (default: <output>.run_report.json)")
     args = parser.parse_args()
 
     # Setup logging
@@ -379,6 +425,14 @@ Tip:
     print_banner()
 
     try:
+        started_at = time.time()
+        report_payload = {
+            "status": "started",
+            "config": args.config,
+            "output": args.output,
+            "upload_mode": "sendgb" if args.sendgb else "gofile" if args.gofile else "none",
+        }
+
         # Validate arguments
         validate_arguments(args)
         
@@ -393,6 +447,27 @@ Tip:
         print_section_header("Setup")
         print_runtime_summary(args, start_utc, end_utc, s3_prefix)
 
+        preflight = run_preflight_checks(start_utc, end_utc, output_path)
+        report_payload["preflight"] = preflight
+        log.info("🧠 Preflight: estimated %s segments for selected range", preflight["expected_segments"])
+        log.info("💽 Preflight: free disk %.2f GiB (recommended %.2f GiB)",
+                 preflight["free_space_bytes"] / (1024 ** 3),
+                 preflight["recommended_space_bytes"] / (1024 ** 3))
+
+        if not preflight["disk_ok"]:
+            raise RuntimeError(
+                "Preflight failed: not enough free disk space for reliable processing "
+                f"(need ~{preflight['recommended_space_bytes']} bytes)."
+            )
+
+        if args.preflight_only:
+            report_payload["status"] = "preflight_only_success"
+            report_payload["duration_seconds"] = round(time.time() - started_at, 2)
+            report_file = args.report_file or f"{output_path}.run_report.json"
+            write_run_report(report_file, report_payload)
+            log.info("Preflight-only mode complete. Report saved to %s", report_file)
+            return 0
+
         # Check for shutdown request
         if _shutdown_requested:
             log.warning("Shutdown requested before processing")
@@ -405,6 +480,7 @@ Tip:
             print_section_header("Downloading from S3")
             s3_reader = S3Reader(start_utc, end_utc, s3_prefix, temp_dir, None)
             files = s3_reader.download_files_parallel()
+            report_payload["downloaded_files"] = len(files)
             if not files:
                 log.error("No files available for parsing. Exiting.")
                 return 1
@@ -417,6 +493,12 @@ Tip:
             print_section_header("Parsing ES Files")
             es_parser = ESParser(start_utc, end_utc, output_path, 1024 * 1024, None)
             es_parser.process_files(files, cleanup_after_processing=False)
+            report_payload["parser"] = {
+                "files_processed": es_parser.total_files_processed,
+                "files_failed": es_parser.total_files_failed,
+                "packets_processed": es_parser.total_packets_processed,
+                "bytes_written": es_parser.output_bytes_written,
+            }
             
             if not os.path.isfile(output_path):
                 raise FileNotFoundError(f"Expected output file not created: {output_path}")
@@ -426,10 +508,20 @@ Tip:
                 return 130
 
             # Upload
-            handle_upload(output_path, args)
+            upload_result = handle_upload(output_path, args)
+            if upload_result:
+                report_payload["upload"] = {
+                    "provider": upload_result[0],
+                    "link": upload_result[1],
+                }
 
         print_final_success()
         log.info("All done successfully.")
+        report_payload["status"] = "success"
+        report_payload["duration_seconds"] = round(time.time() - started_at, 2)
+        report_file = args.report_file or f"{output_path}.run_report.json"
+        write_run_report(report_file, report_payload)
+        log.info("Run report written to %s", report_file)
         return 0
 
     except KeyboardInterrupt:
@@ -448,4 +540,3 @@ Tip:
 
 if __name__ == "__main__":
     sys.exit(main())
-
