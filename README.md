@@ -36,6 +36,21 @@ Set up AWS credentials using one of three methods. You can use environment varia
 
 For uploads to work, you'll need to set up a GoFile token by exporting GOFILE_TOKEN as an environment variable. You can obtain your token from the GoFile.io API after logging in.
 
+## Quick Start for Persistent Environment Variables
+
+To avoid re-exporting AWS and GoFile variables every time you open a new terminal, create a `.env` file in the project root (or in the same directory as your config JSON):
+
+```env
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_DEFAULT_REGION=us-east-1
+GOFILE_TOKEN=your-gofile-token
+```
+
+The CLI now auto-loads `.env` values on startup (without overriding variables already set in your shell).
+
+If you also want these variables globally in your shell, add them to `~/.bashrc` or `~/.zshrc` and reload your shell.
+
 ## Configuration
 
 Create a config.json file in the project root. The configuration file requires several parameters:
@@ -65,7 +80,9 @@ To upload to SendGB with automatic GoFile fallback, use the --sendgb flag. You c
 
 ### Command-Line Options
 
-The tool accepts a config file path and output file path as required positional arguments. Optional arguments include --sendgb to try SendGB upload with GoFile fallback, --gofile to upload directly to GoFile, --sendgb-wait to specify seconds to wait for SendGB upload, and --debug or -d to enable debug logs. Use --help or -h to display the full help message.
+The tool accepts a config file path and output file path as required positional arguments. Optional arguments include --sendgb to try SendGB upload with GoFile fallback, --gofile to upload directly to GoFile (these are now mutually exclusive), --sendgb-wait to specify seconds to wait for SendGB upload, and --debug or -d to enable debug logs. Use --help or -h to display the full help message.
+
+The CLI also prints a clearer run summary (config, output target, time range, S3 prefix, and upload mode) before download starts for better readability and presentation in terminal logs.
 
 ### Examples
 
