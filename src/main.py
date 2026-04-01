@@ -477,6 +477,8 @@ Tip:
                        help="Resume from --resume-state if available")
     parser.add_argument("--temp-dir", default=None,
                        help="Optional persistent temp directory for downloaded ES files")
+    parser.add_argument("--list-expected-files", action="store_true",
+                       help="Print expected S3 file paths for the selected range and exit")
     args = parser.parse_args()
 
     # Setup logging
@@ -553,6 +555,13 @@ Tip:
                 log.info("Dry-run summary: expected_files=%s expected_segments=%s",
                          len(expected_paths), preflight["expected_segments"])
             report_payload["status"] = "dry_run_success" if args.dry_run else "list_expected_files_success"
+        if args.list_expected_files:
+            with tempfile.TemporaryDirectory(prefix="s3_es_manifest_") as temp_dir:
+                manifest_reader = S3Reader(start_utc, end_utc, s3_prefix, temp_dir, None)
+                expected_paths = sorted(manifest_reader.files_to_download_map.keys())
+            for path in expected_paths:
+                print(path)
+            report_payload["status"] = "list_expected_files_success"
             report_payload["expected_files_count"] = len(expected_paths)
             report_payload["duration_seconds"] = round(time.time() - started_at, 2)
             report_file = args.report_file or f"{output_path}.run_report.json"
@@ -561,6 +570,7 @@ Tip:
                 log.info("Dry-run complete. Report saved to %s", report_file)
             else:
                 log.info("Listed %s expected files. Report saved to %s", len(expected_paths), report_file)
+            log.info("Listed %s expected files. Report saved to %s", len(expected_paths), report_file)
             return 0
 
         # Check for shutdown request
