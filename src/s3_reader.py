@@ -46,8 +46,9 @@ class S3Reader:
         resume_state_file: Path to the resume state file
     """
     
-    def __init__(self, start_utc_s: int, end_utc_s: int, s3_prefix: str, 
-                 local_temp_dir: str, resume_state_file: Optional[str] = None):
+    def __init__(self, start_utc_s: int, end_utc_s: int, s3_prefix: str,
+                 local_temp_dir: str, resume_state_file: Optional[str] = None,
+                 max_download_workers: Optional[int] = None):
         """
         Initialize the S3Reader.
         
@@ -63,6 +64,7 @@ class S3Reader:
         self.s3_prefix = s3_prefix
         self.local_temp_dir = local_temp_dir
         self.resume_state_file = resume_state_file
+        self.max_download_workers = max_download_workers or MAX_DOWNLOAD_WORKERS
         self.files_to_download_map: Dict[str, str] = {}  # s3_path -> local_path
         self.downloaded_files: List[str] = []
         self.files_skipped = 0  # Already exists locally
@@ -208,7 +210,7 @@ class S3Reader:
         files_actually_downloaded = 0
         download_lock = threading.Lock()  # For thread-safe counter updates
 
-        with ThreadPoolExecutor(max_workers=MAX_DOWNLOAD_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=self.max_download_workers) as executor:
             # Submit download tasks
             futures = {
                 executor.submit(self._download_file_from_s3, s3_path, local_path): (s3_path, local_path)
