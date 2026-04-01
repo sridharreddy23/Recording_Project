@@ -67,6 +67,7 @@ class S3Reader:
         self.max_download_workers = max_download_workers or MAX_DOWNLOAD_WORKERS
         self.files_to_download_map: Dict[str, str] = {}  # s3_path -> local_path
         self.downloaded_files: List[str] = []
+        self._resumed_local_files: Set[str] = set()
         self.files_skipped = 0  # Already exists locally
         self.files_failed = 0  # Failed after retries
         self.files_found_locally = 0
@@ -194,13 +195,19 @@ class S3Reader:
         from .utils import print_section_header
         
         print_section_header("S3 Parallel Download Process")
+        self.downloaded_files = []
+        self.files_found_locally = 0
+        self.files_failed = 0
+        seen_downloaded_files: Set[str] = set()
 
         # Check which files already exist locally
         files_needing_download = {}
         for s3_path, local_path in self.files_to_download_map.items():
             if os.path.exists(local_path):
                 log.info(f"File already exists locally, skipping download: {os.path.basename(local_path)}")
-                self.downloaded_files.append(local_path)  # Add existing file to list
+                if local_path not in seen_downloaded_files:
+                    self.downloaded_files.append(local_path)  # Add existing file to list once
+                    seen_downloaded_files.add(local_path)
                 self.files_found_locally += 1
             else:
                 files_needing_download[s3_path] = local_path
@@ -225,7 +232,9 @@ class S3Reader:
                     success = future.result()  # Get result (True/False) or raise exception
                     if success:
                         with download_lock:
-                            self.downloaded_files.append(local_path)
+                            if local_path not in seen_downloaded_files:
+                                self.downloaded_files.append(local_path)
+                                seen_downloaded_files.add(local_path)
                             files_actually_downloaded += 1
                     else:
                         # Failure after retries already logged in download_file_from_s3
@@ -298,21 +307,27 @@ class S3Reader:
             return False
             
         try:
-            self.downloaded_files = state_data.get("downloaded_files", [])
-            self.files_found_locally = state_data.get("files_found_locally", 0)
-            self.files_failed = state_data.get("files_failed", 0)
+            downloaded_files = state_data.get("downloaded_files", [])
+            expected_local_paths = set(self.files_to_download_map.values())
             
-            # Validate that the files in the state actually exist
-            valid_files = []
-            for file_path in self.downloaded_files:
-                if os.path.exists(file_path):
-                    valid_files.append(file_path)
+            # Validate that resumed files both exist and belong to the current manifest.
+            valid_files = set()
+            for file_path in downloaded_files:
+                if file_path not in expected_local_paths:
+                    log.debug(f"Ignoring resumed file outside current manifest: {file_path}")
+                elif os.path.exists(file_path):
+                    valid_files.add(file_path)
                 else:
                     log.warning(f"File in resume state not found: {file_path}")
             
-            self.downloaded_files = valid_files
+            self._resumed_local_files = valid_files
+            self.downloaded_files = []
             
-            log.info(f"Resumed from previous state with {len(self.downloaded_files)} valid files")
+            log.info(
+                "Loaded resume state with %s local manifest file(s); "
+                "actual parse list will be rebuilt from current manifest scan.",
+                len(self._resumed_local_files)
+            )
             return True
         except Exception as e:
             log.error(f"Failed to resume from state: {e}")
