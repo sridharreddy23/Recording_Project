@@ -97,9 +97,37 @@ class TestMainHelpers(unittest.TestCase):
             self.assertIn("output_free_space_bytes", result)
             self.assertIn("recommended_space_bytes", result)
             self.assertIn("required_output_space_bytes", result)
+            self.assertIn("required_temp_space_bytes", result)
             self.assertIn("disk_ok", result)
             self.assertIn("temp_disk_ok", result)
             self.assertIn("output_disk_ok", result)
+            self.assertTrue(result["disk_ok"])
+
+
+    def test_run_preflight_checks_temp_uses_download_footprint_not_combined_recommendation(self):
+        """Temp preflight should pass when free space covers downloads even below combined recommendation."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = os.path.join(tmp_dir, "out.ts")
+            output_dir = os.path.dirname(os.path.abspath(output_path))
+            temp_dir = "/mock-temp"
+
+            # 4 segments => estimated/download bytes = 8 MiB, recommendation ~= 17.6 MiB
+            temp_free_bytes = 10 * 1024 * 1024
+
+            def fake_disk_usage(path):
+                if path == temp_dir:
+                    return SimpleNamespace(total=0, used=0, free=temp_free_bytes)
+                if path == output_dir:
+                    return SimpleNamespace(total=0, used=0, free=10 * 1024 * 1024 * 1024)
+                raise AssertionError(f"Unexpected disk_usage path: {path}")
+
+            with patch("src.main.tempfile.gettempdir", return_value=temp_dir), \
+                 patch("src.main.shutil.disk_usage", side_effect=fake_disk_usage):
+                result = run_preflight_checks(100, 116, output_path)
+
+            self.assertEqual(result["required_temp_space_bytes"], 8 * 1024 * 1024)
+            self.assertGreater(result["recommended_space_bytes"], result["required_temp_space_bytes"])
+            self.assertTrue(result["temp_disk_ok"])
             self.assertTrue(result["disk_ok"])
 
     def test_run_preflight_checks_uses_temp_filesystem_for_download_space(self):
