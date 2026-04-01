@@ -160,8 +160,9 @@ def run_preflight_checks(start_utc: int, end_utc: int, output_path: str) -> dict
     """Run quick reliability-oriented checks before expensive operations begin."""
     expected_segments = calculate_expected_segments(start_utc, end_utc)
     estimated_data_bytes = expected_segments * (2 * 1024 * 1024)
-    required_temp_space = calculate_recommended_space_bytes(expected_segments)
+    required_temp_space = estimated_data_bytes
     required_output_space = estimated_data_bytes
+    recommended_space = calculate_recommended_space_bytes(expected_segments)
 
     output_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
     temp_dir = tempfile.gettempdir()
@@ -175,7 +176,8 @@ def run_preflight_checks(start_utc: int, end_utc: int, output_path: str) -> dict
     return {
         "expected_segments": expected_segments,
         "estimated_data_bytes": estimated_data_bytes,
-        "recommended_space_bytes": required_temp_space,
+        "recommended_space_bytes": recommended_space,
+        "required_temp_space_bytes": required_temp_space,
         "required_output_space_bytes": required_output_space,
         "temp_free_space_bytes": temp_free_space,
         "free_space_bytes": temp_free_space,
@@ -465,8 +467,9 @@ Tip:
         preflight = run_preflight_checks(start_utc, end_utc, output_path)
         report_payload["preflight"] = preflight
         log.info("🧠 Preflight: estimated %s segments for selected range", preflight["expected_segments"])
-        log.info("💽 Preflight temp disk: free %.2f GiB (recommended %.2f GiB) at %s",
+        log.info("💽 Preflight temp disk: free %.2f GiB (required %.2f GiB for downloads; recommended %.2f GiB overall) at %s",
                  preflight["temp_free_space_bytes"] / (1024 ** 3),
+                 preflight["required_temp_space_bytes"] / (1024 ** 3),
                  preflight["recommended_space_bytes"] / (1024 ** 3),
                  preflight["temp_dir"])
         log.info("💽 Preflight output disk: free %.2f GiB (required %.2f GiB) at %s",
@@ -477,7 +480,7 @@ Tip:
         if not preflight["disk_ok"]:
             raise RuntimeError(
                 "Preflight failed: not enough free disk space for reliable processing "
-                f"(temp needs ~{preflight['recommended_space_bytes']} bytes at {preflight['temp_dir']}, "
+                f"(temp needs ~{preflight['required_temp_space_bytes']} bytes for downloads at {preflight['temp_dir']}, "
                 f"output needs ~{preflight['required_output_space_bytes']} bytes at {preflight['output_dir']})."
             )
 
