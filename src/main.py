@@ -11,6 +11,8 @@ import signal
 import json
 import shutil
 import time
+from contextlib import nullcontext
+from datetime import datetime, timezone
 from typing import Tuple, Optional, List
 from botocore.exceptions import ClientError
 import boto3
@@ -156,6 +158,41 @@ def calculate_recommended_space_bytes(expected_segments: int, avg_segment_size_b
     return int(estimated_data * 2.2)
 
 
+def parse_cli_time(value: str) -> int:
+    """
+    Parse a CLI time value as UTC epoch seconds.
+
+    Supported formats:
+      - Epoch seconds (e.g. "1711939200")
+      - ISO-8601 date/time (e.g. "2026-04-01T00:00:00Z")
+      - Date only (e.g. "2026-04-01", interpreted as 00:00:00 UTC)
+    """
+    if value is None:
+        raise ValueError("Time value cannot be None")
+
+    raw = str(value).strip()
+    if not raw:
+        raise ValueError("Time value cannot be empty")
+
+    if raw.isdigit() or (raw.startswith("-") and raw[1:].isdigit()):
+        return int(raw)
+
+    iso_candidate = raw.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(iso_candidate)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid time value '{value}'. Use epoch seconds or ISO-8601 (e.g. 2026-04-01T12:00:00Z)."
+        ) from exc
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    return int(dt.timestamp())
+
+
 def run_preflight_checks(start_utc: int, end_utc: int, output_path: str) -> dict:
     """Run quick reliability-oriented checks before expensive operations begin."""
     expected_segments = calculate_expected_segments(start_utc, end_utc)
@@ -294,6 +331,18 @@ def validate_arguments(args: argparse.Namespace) -> None:
     if args.sendgb_wait <= 0:
         raise ValueError(f"--sendgb-wait must be positive, got {args.sendgb_wait}")
 
+    # Validate optional CLI time overrides
+    if args.start_utc is not None:
+        parse_cli_time(args.start_utc)
+    if args.end_utc is not None:
+        parse_cli_time(args.end_utc)
+
+    if args.workers is not None and args.workers <= 0:
+        raise ValueError(f"--workers must be positive, got {args.workers}")
+
+    if args.resume and not args.resume_state:
+        raise ValueError("--resume requires --resume-state to be provided")
+
 
 def print_download_link(provider: str, link: str) -> None:
     """
@@ -409,6 +458,22 @@ Tip:
                        help="Run smart preflight checks and exit without downloading")
     parser.add_argument("--report-file", default=None,
                        help="Optional JSON report path (default: <output>.run_report.json)")
+    parser.add_argument("--start-utc", default=None,
+                       help="Optional start override (epoch seconds or ISO-8601 UTC)")
+    parser.add_argument("--end-utc", default=None,
+                       help="Optional end override (epoch seconds or ISO-8601 UTC)")
+    parser.add_argument("--list-expected-files", action="store_true",
+                       help="Print expected S3 file paths for the selected range and exit")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Run preflight + expected-file manifest summary and exit")
+    parser.add_argument("--workers", type=int, default=None,
+                       help="Optional number of parallel S3 download workers (default: 10)")
+    parser.add_argument("--resume-state", default=None,
+                       help="Path to JSON state file for saving/resuming download progress")
+    parser.add_argument("--resume", action="store_true",
+                       help="Resume from --resume-state if available")
+    parser.add_argument("--temp-dir", default=None,
+                       help="Optional persistent temp directory for downloaded ES files")
     args = parser.parse_args()
 
     # Setup logging
@@ -441,6 +506,12 @@ Tip:
         setup_aws_credentials(cfg)
 
         start_utc, end_utc = cfg.get_start_utc(), cfg.get_end_utc()
+        if args.start_utc is not None:
+            start_utc = parse_cli_time(args.start_utc)
+        if args.end_utc is not None:
+            end_utc = parse_cli_time(args.end_utc)
+        if end_utc <= start_utc:
+            raise ValueError(f"Invalid time range: start_utc={start_utc}, end_utc={end_utc}")
         s3_prefix = cfg.get_s3_prefix()
         output_path = args.output
 
@@ -468,17 +539,56 @@ Tip:
             log.info("Preflight-only mode complete. Report saved to %s", report_file)
             return 0
 
+        if args.list_expected_files or args.dry_run:
+            with tempfile.TemporaryDirectory(prefix="s3_es_manifest_") as temp_dir:
+                manifest_reader = S3Reader(start_utc, end_utc, s3_prefix, temp_dir, None)
+                expected_paths = sorted(manifest_reader.files_to_download_map.keys())
+            if args.list_expected_files:
+                for path in expected_paths:
+                    print(path)
+            if args.dry_run:
+                log.info("Dry-run summary: expected_files=%s expected_segments=%s",
+                         len(expected_paths), preflight["expected_segments"])
+            report_payload["status"] = "dry_run_success" if args.dry_run else "list_expected_files_success"
+            report_payload["expected_files_count"] = len(expected_paths)
+            report_payload["duration_seconds"] = round(time.time() - started_at, 2)
+            report_file = args.report_file or f"{output_path}.run_report.json"
+            write_run_report(report_file, report_payload)
+            if args.dry_run:
+                log.info("Dry-run complete. Report saved to %s", report_file)
+            else:
+                log.info("Listed %s expected files. Report saved to %s", len(expected_paths), report_file)
+            return 0
+
         # Check for shutdown request
         if _shutdown_requested:
             log.warning("Shutdown requested before processing")
             return 130
 
-        with tempfile.TemporaryDirectory(prefix="s3_es_parser_") as temp_dir:
+        if args.temp_dir:
+            os.makedirs(args.temp_dir, exist_ok=True)
+            temp_dir_context = nullcontext(args.temp_dir)
+        else:
+            temp_dir_context = tempfile.TemporaryDirectory(prefix="s3_es_parser_")
+
+        with temp_dir_context as temp_dir:
             log.debug(f"Using temporary directory: {temp_dir}")
             
             # Download
             print_section_header("Downloading from S3")
-            s3_reader = S3Reader(start_utc, end_utc, s3_prefix, temp_dir, None)
+            s3_reader = S3Reader(
+                start_utc,
+                end_utc,
+                s3_prefix,
+                temp_dir,
+                resume_state_file=args.resume_state,
+                max_download_workers=args.workers,
+            )
+            if args.resume and args.resume_state:
+                state_data = load_progress_state(args.resume_state)
+                resumed = s3_reader.resume_from_state(state_data)
+                if resumed:
+                    log.info("Resume state loaded from %s", args.resume_state)
             files = s3_reader.download_files_parallel()
             report_payload["downloaded_files"] = len(files)
             if not files:
