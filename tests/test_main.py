@@ -10,6 +10,7 @@ from src.main import (
     calculate_expected_segments,
     calculate_recommended_space_bytes,
     load_environment_from_dotenv,
+    parse_cli_time,
     print_runtime_summary,
     run_preflight_checks,
     write_run_report,
@@ -84,6 +85,23 @@ class TestMainHelpers(unittest.TestCase):
         self.assertEqual(calculate_recommended_space_bytes(0), 0)
         expected = int(3 * (2 * 1024 * 1024) * 2.2)
         self.assertEqual(calculate_recommended_space_bytes(3), expected)
+
+    def test_parse_cli_time_epoch(self):
+        """Should parse epoch second input directly."""
+        self.assertEqual(parse_cli_time("1711939200"), 1711939200)
+
+    def test_parse_cli_time_iso_z(self):
+        """Should parse ISO-8601 timestamp with Z suffix."""
+        self.assertEqual(parse_cli_time("2026-04-01T00:00:00Z"), 1775001600)
+
+    def test_parse_cli_time_date_only(self):
+        """Should parse date-only input as UTC midnight."""
+        self.assertEqual(parse_cli_time("2026-04-01"), 1775001600)
+
+    def test_parse_cli_time_invalid(self):
+        """Invalid timestamp strings should raise ValueError."""
+        with self.assertRaises(ValueError):
+            parse_cli_time("not-a-time")
 
     def test_run_preflight_checks(self):
         """Preflight should return expected structure and valid disk check."""
