@@ -140,6 +140,7 @@ class TestMainHelpers(unittest.TestCase):
                 workers=0,
                 resume=False,
                 resume_state=None,
+                temp_dir=None,
             )
             with self.assertRaises(ValueError):
                 validate_arguments(args)
@@ -159,6 +160,27 @@ class TestMainHelpers(unittest.TestCase):
                 workers=None,
                 resume=True,
                 resume_state=None,
+                temp_dir=None,
+            )
+            with self.assertRaises(ValueError):
+                validate_arguments(args)
+
+    def test_validate_arguments_requires_temp_dir_with_resume(self):
+        """Resume mode should require a persistent temp dir."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = os.path.join(tmp_dir, "config.json")
+            with open(config_path, "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            args = Namespace(
+                config=config_path,
+                output=os.path.join(tmp_dir, "out.ts"),
+                sendgb_wait=1,
+                start_utc=None,
+                end_utc=None,
+                workers=None,
+                resume=True,
+                resume_state=os.path.join(tmp_dir, "resume.json"),
+                temp_dir=None,
             )
             with self.assertRaises(ValueError):
                 validate_arguments(args)

@@ -342,6 +342,8 @@ def validate_arguments(args: argparse.Namespace) -> None:
 
     if args.resume and not args.resume_state:
         raise ValueError("--resume requires --resume-state to be provided")
+    if args.resume and not args.temp_dir:
+        raise ValueError("--resume requires --temp-dir so downloaded files can persist across runs")
 
 
 def print_download_link(provider: str, link: str) -> None:
@@ -454,18 +456,19 @@ Tip:
                        help="Seconds to wait for SendGB upload (default: 600)")
     parser.add_argument("--debug", "-d", action="store_true", 
                        help="Enable debug logs")
-    parser.add_argument("--preflight-only", action="store_true",
-                       help="Run smart preflight checks and exit without downloading")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--preflight-only", action="store_true",
+                            help="Run smart preflight checks and exit without downloading")
     parser.add_argument("--report-file", default=None,
                        help="Optional JSON report path (default: <output>.run_report.json)")
     parser.add_argument("--start-utc", default=None,
                        help="Optional start override (epoch seconds or ISO-8601 UTC)")
     parser.add_argument("--end-utc", default=None,
                        help="Optional end override (epoch seconds or ISO-8601 UTC)")
-    parser.add_argument("--list-expected-files", action="store_true",
-                       help="Print expected S3 file paths for the selected range and exit")
-    parser.add_argument("--dry-run", action="store_true",
-                       help="Run preflight + expected-file manifest summary and exit")
+    mode_group.add_argument("--list-expected-files", action="store_true",
+                            help="Print expected S3 file paths for the selected range and exit")
+    mode_group.add_argument("--dry-run", action="store_true",
+                            help="Run preflight + expected-file manifest summary and exit")
     parser.add_argument("--workers", type=int, default=None,
                        help="Optional number of parallel S3 download workers (default: 10)")
     parser.add_argument("--resume-state", default=None,
